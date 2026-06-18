@@ -193,14 +193,14 @@ def proximo_id(df):
 # ============================================================
 
 st.set_page_config(
-    page_title="Biblioteca Pessoal",
+    page_title="Biblioteca",
     page_icon="📚",
     layout="wide"
 )
 
 df = carregar_catalogo()
 
-st.title("📚 Biblioteca Pessoal")
+st.title("📚 Biblioteca")
 st.caption(f"{len(df)} livros catalogados")
 st.divider()
 
