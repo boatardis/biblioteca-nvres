@@ -165,6 +165,7 @@ def buscar_google_books(titulo):
             "q": titulo,
             "maxResults": 5,
             "printType": "books",
+            "country": "BR",
             "key": st.secrets["google_books"]["api_key"]
         }
 
