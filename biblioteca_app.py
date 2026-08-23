@@ -278,7 +278,7 @@ with aba_comprar:
 with aba_adicionar:
     st.subheader("Adicionar livro")
 
-    # Inicializa session_state para guardar sugestões e seleção
+    # Inicializa session_state
     if "sugestoes" not in st.session_state:
         st.session_state.sugestoes = []
     if "autor_preenchido" not in st.session_state:
@@ -286,57 +286,56 @@ with aba_adicionar:
     if "titulo_selecionado" not in st.session_state:
         st.session_state.titulo_selecionado = ""
 
-    # Campo de busca + botão
-    col_input, col_btn = st.columns([4, 1])
-    with col_input:
-        titulo_digitado = st.text_input(
-            "Buscar título:",
-            placeholder="Digite o título e clique em Buscar",
-            key="titulo_busca_api",
-        )
-    with col_btn:
-        st.write("")  # alinha verticalmente com o input
-        buscar = st.button("🔍 Buscar", use_container_width=True)
+    def ao_digitar_titulo():
+        """
+        Chamada automaticamente toda vez que o campo título muda.
+        on_change é um parâmetro do st.text_input que executa
+        uma função sempre que o valor do campo é alterado.
+        """
+        titulo = st.session_state.campo_titulo
+        if titulo and len(titulo) >= 3:
+            st.session_state.sugestoes = buscar_google_books(titulo)
+        else:
+            st.session_state.sugestoes = []
+        # Limpa seleção anterior quando digita algo novo
+        st.session_state.titulo_selecionado = ""
+        st.session_state.autor_preenchido = ""
 
-    # Quando clica em Buscar, chama a API e salva no session_state
-    if buscar and titulo_digitado and len(titulo_digitado) >= 3:
-        with st.spinner("Buscando..."):
-            st.session_state.sugestoes = buscar_google_books(titulo_digitado)
-            # Limpa seleção anterior ao fazer nova busca
-            st.session_state.titulo_selecionado = ""
-            st.session_state.autor_preenchido = ""
+    # Campo título com on_change — busca automaticamente ao digitar
+    titulo_digitado = st.text_input(
+        "Título *",
+        placeholder="Digite o título para ver sugestões...",
+        key="campo_titulo",
+        on_change=ao_digitar_titulo
+    )
 
-    # Seletor de sugestões — aparece depois de buscar
+    # Seletor aparece automaticamente quando há sugestões
     if st.session_state.sugestoes:
         opcoes_sugestoes = {
             f"{s['titulo']} — {s['autor']}" if s['autor'] else s['titulo']: s
             for s in st.session_state.sugestoes
         }
-        # Opção vazia no topo para o usuário escolher
-        opcoes_lista = ["— Selecione uma sugestão ou preencha manualmente —"] + list(opcoes_sugestoes.keys())
+        opcoes_lista = ["— Selecione uma sugestão —"] + list(opcoes_sugestoes.keys())
 
         escolha = st.selectbox(
-            "Sugestões do Google Books:",
+            "Sugestões:",
             opcoes_lista,
             key="selectbox_sugestao"
         )
 
-        # Quando seleciona uma sugestão, preenche os campos
-        if escolha != "— Selecione uma sugestão ou preencha manualmente —":
+        if escolha != "— Selecione uma sugestão —":
             livro_escolhido = opcoes_sugestoes[escolha]
             st.session_state.titulo_selecionado = livro_escolhido["titulo"]
             st.session_state.autor_preenchido = livro_escolhido["autor"]
 
-    st.divider()
-
-    # Formulário principal — só salva quando clicar em Adicionar
+    # Formulário — só salva quando clicar em Adicionar
     with st.form("form_adicionar", clear_on_submit=True):
         col1, col2 = st.columns(2)
 
         with col1:
             novo_titulo = st.text_input(
-                "Título *",
-                value=st.session_state.titulo_selecionado
+                "Confirme o título *",
+                value=st.session_state.titulo_selecionado or titulo_digitado
             )
             novo_autor = st.text_input(
                 "Autor *",
