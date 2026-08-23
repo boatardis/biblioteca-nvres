@@ -149,45 +149,45 @@ def proximo_id(df):
 
 
 @st.cache_data(ttl=60)
-def buscar_google_books(titulo):
+def buscar_livros(titulo):
     """
-    Busca livros na API do Google Books pelo título.
-    
-    @st.cache_data(ttl=60) guarda o resultado por 60 segundos
-    para não chamar a API a cada letra digitada.
+    Busca livros na API da Open Library pelo título.
+    Retorna até 20 resultados ordenados por relevância.
+    Open Library tem resultados mais precisos e não precisa
+    de chave de API.
     """
     if not titulo or len(titulo) < 3:
         return []
 
     try:
-        url = "https://www.googleapis.com/books/v1/volumes"
+        url = "https://openlibrary.org/search.json"
         params = {
-            "q": titulo,
-            "maxResults": 5,
-            "printType": "books",
-            "country": "BR",
-            "key": st.secrets["google_books"]["api_key"]
+            "title": titulo,
+            "limit": 20,
+            "fields": "title,author_name"
         }
 
         resposta = requests.get(url, params=params, timeout=5)
 
         if resposta.status_code != 200:
-            st.warning(f"API retornou status {resposta.status_code}: {resposta.text[:200]}")
             return []
 
         dados = resposta.json()
 
-        if "items" not in dados:
+        if "docs" not in dados or not dados["docs"]:
             return []
 
         sugestoes = []
-        for item in dados["items"]:
-            info = item.get("volumeInfo", {})
-            titulo_livro = info.get("title", "")
-            autores = info.get("authors", [])
-            autor = ", ".join(autores) if autores else ""
+        vistos = set()  # evita títulos duplicados
 
-            if titulo_livro:
+        for item in dados["docs"]:
+            titulo_livro = item.get("title", "").strip()
+            autores = item.get("author_name", [])
+            autor = autores[0] if autores else ""
+
+            chave = normalizar(titulo_livro)
+            if chave and chave not in vistos:
+                vistos.add(chave)
                 sugestoes.append({
                     "titulo": titulo_livro,
                     "autor": autor,
@@ -294,7 +294,7 @@ with aba_adicionar:
         """
         titulo = st.session_state.campo_titulo
         if titulo and len(titulo) >= 3:
-            st.session_state.sugestoes = buscar_google_books(titulo)
+            st.session_state.sugestoes = buscar_livros(titulo)
         else:
             st.session_state.sugestoes = []
         # Limpa seleção anterior quando digita algo novo
@@ -311,10 +311,15 @@ with aba_adicionar:
 
     # Seletor aparece automaticamente quando há sugestões
     if st.session_state.sugestoes:
-        opcoes_sugestoes = {
-            f"{s['titulo']} — {s['autor']}" if s['autor'] else s['titulo']: s
-            for s in st.session_state.sugestoes
-        }
+        # Monta as opções com título e autor em linhas separadas
+        opcoes_sugestoes = {}
+        for s in st.session_state.sugestoes:
+            if s["autor"]:
+                label = f"{s['titulo']}\n    ↳ {s['autor']}"
+            else:
+                label = s["titulo"]
+            opcoes_sugestoes[label] = s
+
         opcoes_lista = ["— Selecione uma sugestão —"] + list(opcoes_sugestoes.keys())
 
         escolha = st.selectbox(
