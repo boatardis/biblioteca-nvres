@@ -1,37 +1,43 @@
 # ============================================================
 # BIBLIOTECA PESSOAL — Fase 2 (Streamlit + Google Sheets)
 # ============================================================
-# Este arquivo é a interface web do sistema.
-# Usa o Streamlit para criar a página no navegador e
-# o Google Sheets como banco de dados permanente.
-#
-# Como rodar localmente:
-#   streamlit run biblioteca_app.py
-# ============================================================
-
-
-# --- IMPORTS ---
 import streamlit as st
 import pandas as pd
 import unicodedata
 import gspread
+import requests
 from google.oauth2.service_account import Credentials
 
 
 # --- CONFIGURAÇÃO ---
-# ID da planilha do Google Sheets
 SHEET_ID = "1pz19lMUQEMx2HXDqJhchiNOHJ3PPRepSc4L60DeSKvE"
-
-# Nome da aba dentro da planilha
 SHEET_NAME = "Página1"
-
-# Colunas do catálogo
-COLUNAS = ["id", "dono", "titulo", "autor", "edicao"]
-
-# Escopos de acesso — o que o sistema pode fazer no Google
+COLUNAS = ["id", "dono", "titulo", "autor", "edicao", "categoria"]
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive"
+]
+
+DONOS = ["Elisa", "Francisco", "Luisa", "Patrícia"]
+
+CATEGORIAS = [
+    "Ficção",
+    "Fantasia",
+    "Ficção Científica",
+    "Terror",
+    "Romance",
+    "Clássicos",
+    "História",
+    "Filosofia",
+    "Economia e Política",
+    "Ciências",
+    "Quadrinhos e HQ",
+    "Culinária",
+    "Autoajuda",
+    "Infantojuvenil",
+    "Referência e Didático",
+    "Tarô e Espiritualidade",
+    "Outros",
 ]
 
 
@@ -50,14 +56,7 @@ def normalizar(texto):
 
 
 def conectar_sheets():
-    """
-    Conecta ao Google Sheets usando as credenciais guardadas
-    nos Secrets do Streamlit Cloud.
-
-    st.secrets lê o arquivo de secrets configurado no Streamlit —
-    é como um cofre seguro que guarda informações sensíveis
-    sem expor no código ou no GitHub.
-    """
+    """Conecta ao Google Sheets usando os Secrets do Streamlit."""
     credenciais = Credentials.from_service_account_info(
         st.secrets["gcp_service_account"],
         scopes=SCOPES
@@ -70,13 +69,7 @@ def conectar_sheets():
 
 @st.cache_data(ttl=30)
 def carregar_catalogo():
-    """
-    Lê os dados do Google Sheets e retorna um DataFrame.
-
-    @st.cache_data(ttl=30) guarda os dados em memória por 30 segundos.
-    Isso evita chamar a API do Google a cada clique do usuário.
-    Após 30 segundos, recarrega os dados frescos da planilha.
-    """
+    """Lê os dados do Google Sheets e retorna um DataFrame."""
     try:
         aba = conectar_sheets()
         dados = aba.get_all_records()
@@ -86,7 +79,6 @@ def carregar_catalogo():
 
         df = pd.DataFrame(dados, dtype=str)
 
-        # Garante que todas as colunas existam
         for coluna in COLUNAS:
             if coluna not in df.columns:
                 df[coluna] = ""
@@ -99,10 +91,7 @@ def carregar_catalogo():
 
 
 def salvar_linha(novo_livro):
-    """
-    Adiciona uma linha nova no Google Sheets.
-    Mais eficiente que reescrever a planilha inteira.
-    """
+    """Adiciona uma linha nova no Google Sheets."""
     try:
         aba = conectar_sheets()
         aba.append_row([
@@ -110,7 +99,8 @@ def salvar_linha(novo_livro):
             novo_livro["dono"],
             novo_livro["titulo"],
             novo_livro["autor"],
-            novo_livro["edicao"]
+            novo_livro["edicao"],
+            novo_livro["categoria"]
         ])
         st.cache_data.clear()
         return True
@@ -120,28 +110,22 @@ def salvar_linha(novo_livro):
 
 
 def atualizar_linha(df, idx_df, dados_atualizados):
-    """
-    Atualiza uma linha existente no Google Sheets.
-    Encontra a linha pelo ID e substitui os valores.
-    """
+    """Atualiza uma linha existente no Google Sheets."""
     try:
         aba = conectar_sheets()
-
-        # Pega todos os valores para encontrar a linha certa
         todos = aba.get_all_values()
         id_busca = str(df.loc[idx_df, "id"])
 
-        # Percorre as linhas procurando o ID
-        # A linha 1 é o cabeçalho, então começamos do índice 2
         for i, linha in enumerate(todos):
             if linha[0] == id_busca:
-                num_linha = i + 1  # Sheets usa índice começando em 1
-                aba.update(f"A{num_linha}:E{num_linha}", [[
+                num_linha = i + 1
+                aba.update(f"A{num_linha}:F{num_linha}", [[
                     dados_atualizados["id"],
                     dados_atualizados["dono"],
                     dados_atualizados["titulo"],
                     dados_atualizados["autor"],
-                    dados_atualizados["edicao"]
+                    dados_atualizados["edicao"],
+                    dados_atualizados["categoria"]
                 ]])
                 st.cache_data.clear()
                 return True
@@ -155,9 +139,7 @@ def atualizar_linha(df, idx_df, dados_atualizados):
 
 
 def remover_linha(df, idx_df):
-    """
-    Remove uma linha do Google Sheets pelo ID.
-    """
+    """Remove uma linha do Google Sheets pelo ID."""
     try:
         aba = conectar_sheets()
         todos = aba.get_all_values()
@@ -188,19 +170,65 @@ def proximo_id(df):
     return int(ids_validos.astype(int).max()) + 1
 
 
+def buscar_google_books(titulo):
+    """
+    Busca livros na API do Google Books pelo título.
+    Retorna uma lista de sugestões com título e autor.
+    """
+    if not titulo or len(titulo) < 3:
+        return []
+
+    try:
+        url = "https://www.googleapis.com/books/v1/volumes"
+        params = {
+            "q": titulo,
+            "langRestrict": "pt",
+            "maxResults": 5,
+            "printType": "books"
+        }
+
+        resposta = requests.get(url, params=params, timeout=5)
+
+        if resposta.status_code != 200:
+            return []
+
+        dados = resposta.json()
+
+        if "items" not in dados:
+            return []
+
+        sugestoes = []
+        for item in dados["items"]:
+            info = item.get("volumeInfo", {})
+            titulo_livro = info.get("title", "")
+            autores = info.get("authors", [])
+            autor = ", ".join(autores) if autores else ""
+
+            if titulo_livro:
+                sugestoes.append({
+                    "titulo": titulo_livro,
+                    "autor": autor,
+                })
+
+        return sugestoes
+
+    except Exception:
+        return []
+
+
 # ============================================================
 # CONFIGURAÇÃO DA PÁGINA
 # ============================================================
 
 st.set_page_config(
-    page_title="Biblioteca",
+    page_title="Biblioteca Pessoal",
     page_icon="📚",
     layout="wide"
 )
 
 df = carregar_catalogo()
 
-st.title("📚 Biblioteca")
+st.title("📚 Biblioteca Pessoal")
 st.caption(f"{len(df)} livros catalogados")
 st.divider()
 
@@ -209,8 +237,7 @@ st.divider()
 # ABAS
 # ============================================================
 
-aba_busca, aba_comprar, aba_adicionar, aba_editar, aba_remover, aba_todos, aba_stats = st.tabs([
-    "🔍 Buscar",
+aba_comprar, aba_adicionar, aba_editar, aba_remover, aba_todos, aba_stats = st.tabs([
     "🛒 Verificar antes de comprar",
     "➕ Adicionar",
     "✏️ Editar",
@@ -221,47 +248,14 @@ aba_busca, aba_comprar, aba_adicionar, aba_editar, aba_remover, aba_todos, aba_s
 
 
 # ============================================================
-# ABA 1 — BUSCAR
-# ============================================================
-
-with aba_busca:
-    st.subheader("Buscar livro")
-    st.write("Busque por título, autor, dono ou edição.")
-
-    termo = st.text_input("Digite sua busca:", placeholder="ex: Machado de Assis")
-
-    if termo:
-        termo_normalizado = normalizar(termo)
-
-        mask = df.apply(
-            lambda row: any(
-                termo_normalizado in normalizar(str(row[col]))
-                for col in ["titulo", "autor", "dono", "edicao"]
-            ),
-            axis=1
-        )
-        resultados = df[mask]
-
-        if resultados.empty:
-            st.warning(f"Nenhum livro encontrado para '{termo}'.")
-        else:
-            st.success(f"{len(resultados)} livro(s) encontrado(s).")
-            st.dataframe(
-                resultados[["id", "titulo", "autor", "dono", "edicao"]],
-                use_container_width=True,
-                hide_index=True
-            )
-
-
-# ============================================================
-# ABA 2 — VERIFICAR ANTES DE COMPRAR
+# ABA 1 — VERIFICAR ANTES DE COMPRAR
 # ============================================================
 
 with aba_comprar:
     st.subheader("Verificar antes de comprar")
     st.write("Digite o título e descubra se já temos o livro.")
 
-    titulo_busca = st.text_input("Título do livro:", placeholder="ex: Grande Sertão", key="comprar")
+    titulo_busca = st.text_input("Título do livro:", placeholder="ex: Grande Sertão")
 
     if titulo_busca:
         titulo_normalizado = normalizar(titulo_busca)
@@ -270,7 +264,7 @@ with aba_comprar:
         if not exatos.empty:
             st.error("⚠️ Já temos este livro na biblioteca!")
             st.dataframe(
-                exatos[["id", "titulo", "autor", "dono", "edicao"]],
+                exatos[["id", "titulo", "autor", "dono", "categoria", "edicao"]],
                 use_container_width=True,
                 hide_index=True
             )
@@ -285,7 +279,7 @@ with aba_comprar:
             if not parecidos.empty:
                 st.warning("Não encontramos esse título exato, mas existem títulos parecidos:")
                 st.dataframe(
-                    parecidos[["id", "titulo", "autor", "dono", "edicao"]],
+                    parecidos[["id", "titulo", "autor", "dono", "categoria", "edicao"]],
                     use_container_width=True,
                     hide_index=True
                 )
@@ -294,28 +288,54 @@ with aba_comprar:
 
 
 # ============================================================
-# ABA 3 — ADICIONAR
+# ABA 2 — ADICIONAR
 # ============================================================
 
 with aba_adicionar:
     st.subheader("Adicionar livro")
 
+    # Inicializa o session_state para guardar sugestão selecionada
+    if "autor_preenchido" not in st.session_state:
+        st.session_state.autor_preenchido = ""
+    if "titulo_selecionado" not in st.session_state:
+        st.session_state.titulo_selecionado = ""
+
+    # Campo de busca fora do formulário para sugestões em tempo real
+    titulo_digitado = st.text_input("Buscar título:", placeholder="Digite para ver sugestões", key="titulo_busca_api")
+
+    # Busca sugestões no Google Books enquanto o usuário digita
+    if titulo_digitado and len(titulo_digitado) >= 3:
+        sugestoes = buscar_google_books(titulo_digitado)
+
+        if sugestoes:
+            st.write("**Selecione uma sugestão para preencher automaticamente:**")
+            for s in sugestoes:
+                label = f"{s['titulo']} — {s['autor']}" if s['autor'] else s['titulo']
+                if st.button(label, key=f"sug_{s['titulo']}"):
+                    st.session_state.titulo_selecionado = s["titulo"]
+                    st.session_state.autor_preenchido = s["autor"]
+                    st.rerun()
+
+    st.divider()
+
+    # Formulário principal
     with st.form("form_adicionar", clear_on_submit=True):
         col1, col2 = st.columns(2)
 
         with col1:
-            novo_titulo = st.text_input("Título *")
-            novo_autor = st.text_input("Autor *")
+            novo_titulo = st.text_input("Título *", value=st.session_state.titulo_selecionado)
+            novo_autor = st.text_input("Autor *", value=st.session_state.autor_preenchido)
+            nova_edicao = st.text_input("Edição/Editora (opcional)")
 
         with col2:
-            novo_dono = st.text_input("De quem é *", placeholder="ex: Elisa")
-            nova_edicao = st.text_input("Edição/Editora (opcional)")
+            novo_dono = st.selectbox("De quem é *", DONOS)
+            nova_categoria = st.selectbox("Categoria *", CATEGORIAS)
 
         submitted = st.form_submit_button("Adicionar livro", type="primary")
 
         if submitted:
-            if not all([novo_titulo, novo_autor, novo_dono]):
-                st.error("Preencha todos os campos obrigatórios (*).")
+            if not all([novo_titulo, novo_autor]):
+                st.error("Título e autor são obrigatórios.")
             else:
                 titulo_norm = normalizar(novo_titulo)
                 existentes = df[df["titulo"].apply(normalizar).str.contains(titulo_norm, na=False)]
@@ -330,16 +350,19 @@ with aba_adicionar:
                     "dono": novo_dono,
                     "titulo": novo_titulo,
                     "autor": novo_autor,
-                    "edicao": nova_edicao
+                    "edicao": nova_edicao,
+                    "categoria": nova_categoria
                 }
 
                 if salvar_linha(novo_livro):
+                    st.session_state.titulo_selecionado = ""
+                    st.session_state.autor_preenchido = ""
                     st.success(f"✅ '{novo_titulo}' adicionado com sucesso!")
                     st.rerun()
 
 
 # ============================================================
-# ABA 4 — EDITAR
+# ABA 3 — EDITAR
 # ============================================================
 
 with aba_editar:
@@ -369,10 +392,14 @@ with aba_editar:
                 with col1:
                     ed_titulo = st.text_input("Título", value=livro["titulo"])
                     ed_autor = st.text_input("Autor", value=livro["autor"])
+                    ed_edicao = st.text_input("Edição/Editora", value=livro["edicao"])
 
                 with col2:
-                    ed_dono = st.text_input("De quem é", value=livro["dono"])
-                    ed_edicao = st.text_input("Edição/Editora", value=livro["edicao"])
+                    dono_idx = DONOS.index(livro["dono"]) if livro["dono"] in DONOS else 0
+                    ed_dono = st.selectbox("De quem é", DONOS, index=dono_idx)
+
+                    cat_idx = CATEGORIAS.index(livro["categoria"]) if livro["categoria"] in CATEGORIAS else 0
+                    ed_categoria = st.selectbox("Categoria", CATEGORIAS, index=cat_idx)
 
                 salvar = st.form_submit_button("Salvar alterações", type="primary")
 
@@ -382,7 +409,8 @@ with aba_editar:
                         "dono": ed_dono,
                         "titulo": ed_titulo,
                         "autor": ed_autor,
-                        "edicao": ed_edicao
+                        "edicao": ed_edicao,
+                        "categoria": ed_categoria
                     }
                     if atualizar_linha(df, idx_editar, dados_atualizados):
                         st.success("✅ Livro atualizado com sucesso!")
@@ -390,7 +418,7 @@ with aba_editar:
 
 
 # ============================================================
-# ABA 5 — REMOVER
+# ABA 4 — REMOVER
 # ============================================================
 
 with aba_remover:
@@ -415,7 +443,7 @@ with aba_remover:
             livro_rem = df.loc[idx_remover]
 
             st.dataframe(
-                pd.DataFrame([livro_rem])[["titulo", "autor", "dono", "edicao"]],
+                pd.DataFrame([livro_rem])[["titulo", "autor", "dono", "categoria", "edicao"]],
                 hide_index=True,
                 use_container_width=True
             )
@@ -427,7 +455,7 @@ with aba_remover:
 
 
 # ============================================================
-# ABA 6 — TODOS OS LIVROS
+# ABA 5 — TODOS OS LIVROS
 # ============================================================
 
 with aba_todos:
@@ -436,25 +464,34 @@ with aba_todos:
     if df.empty:
         st.info("O catálogo está vazio.")
     else:
-        donos = ["Todos"] + sorted(df["dono"].unique().tolist())
-        filtro_dono = st.selectbox("Filtrar por dono:", donos)
+        col1, col2 = st.columns(2)
+
+        with col1:
+            donos_filtro = ["Todos"] + DONOS
+            filtro_dono = st.selectbox("Filtrar por dono:", donos_filtro)
+
+        with col2:
+            cats_filtro = ["Todas"] + CATEGORIAS
+            filtro_categoria = st.selectbox("Filtrar por categoria:", cats_filtro)
 
         df_filtrado = df.copy()
         if filtro_dono != "Todos":
             df_filtrado = df_filtrado[df_filtrado["dono"] == filtro_dono]
+        if filtro_categoria != "Todas":
+            df_filtrado = df_filtrado[df_filtrado["categoria"] == filtro_categoria]
 
         df_filtrado = df_filtrado.sort_values(by=["dono", "titulo"])
 
         st.caption(f"{len(df_filtrado)} livro(s)")
         st.dataframe(
-            df_filtrado[["id", "titulo", "autor", "dono", "edicao"]],
+            df_filtrado[["id", "titulo", "autor", "dono", "categoria", "edicao"]],
             use_container_width=True,
             hide_index=True
         )
 
 
 # ============================================================
-# ABA 7 — ESTATÍSTICAS
+# ABA 6 — ESTATÍSTICAS
 # ============================================================
 
 with aba_stats:
@@ -463,15 +500,26 @@ with aba_stats:
     if df.empty:
         st.info("O catálogo está vazio.")
     else:
-        col1, col2 = st.columns(2)
+        col1, col2, col3 = st.columns(3)
         with col1:
             st.metric("Total de livros", len(df))
         with col2:
             st.metric("Donos", df["dono"].nunique())
+        with col3:
+            st.metric("Categorias", df["categoria"].nunique())
 
         st.divider()
 
-        st.write("**Por dono:**")
-        contagem_dono = df["dono"].value_counts().reset_index()
-        contagem_dono.columns = ["Dono", "Livros"]
-        st.dataframe(contagem_dono, hide_index=True, use_container_width=True)
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.write("**Por dono:**")
+            contagem_dono = df["dono"].value_counts().reset_index()
+            contagem_dono.columns = ["Dono", "Livros"]
+            st.dataframe(contagem_dono, hide_index=True, use_container_width=True)
+
+        with col2:
+            st.write("**Por categoria:**")
+            contagem_cat = df["categoria"].value_counts().reset_index()
+            contagem_cat.columns = ["Categoria", "Livros"]
+            st.dataframe(contagem_cat, hide_index=True, use_container_width=True)
