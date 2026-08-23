@@ -171,6 +171,7 @@ def buscar_google_books(titulo):
         resposta = requests.get(url, params=params, timeout=5)
 
         if resposta.status_code != 200:
+            st.warning(f"API retornou status {resposta.status_code}: {resposta.text[:200]}")
             return []
 
         dados = resposta.json()
@@ -193,7 +194,8 @@ def buscar_google_books(titulo):
 
         return sugestoes
 
-    except Exception:
+    except Exception as e:
+        st.error(f"Erro na busca: {e}")
         return []
 
 
