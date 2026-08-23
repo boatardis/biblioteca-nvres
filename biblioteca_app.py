@@ -278,49 +278,58 @@ with aba_comprar:
 with aba_adicionar:
     st.subheader("Adicionar livro")
 
-    # Inicializa session_state para guardar sugestão selecionada
-    # session_state persiste valores entre interações do usuário
+    # Inicializa session_state para guardar sugestões e seleção
+    if "sugestoes" not in st.session_state:
+        st.session_state.sugestoes = []
     if "autor_preenchido" not in st.session_state:
         st.session_state.autor_preenchido = ""
     if "titulo_selecionado" not in st.session_state:
         st.session_state.titulo_selecionado = ""
 
-    st.write("**Buscar na base do Google Books:**")
-    st.caption("Digite pelo menos 3 letras e clique em Buscar")
-
-    # Usamos um botão explícito de busca em vez de buscar
-    # enquanto digita — mais confiável no Streamlit
+    # Campo de busca + botão
     col_input, col_btn = st.columns([4, 1])
     with col_input:
         titulo_digitado = st.text_input(
-            "Título para buscar:",
-            placeholder="ex: Grande Sertão",
+            "Buscar título:",
+            placeholder="Digite o título e clique em Buscar",
             key="titulo_busca_api",
-            label_visibility="collapsed"
         )
     with col_btn:
+        st.write("")  # alinha verticalmente com o input
         buscar = st.button("🔍 Buscar", use_container_width=True)
 
-    # Busca só quando o botão é clicado
+    # Quando clica em Buscar, chama a API e salva no session_state
     if buscar and titulo_digitado and len(titulo_digitado) >= 3:
         with st.spinner("Buscando..."):
-            sugestoes = buscar_google_books(titulo_digitado)
+            st.session_state.sugestoes = buscar_google_books(titulo_digitado)
+            # Limpa seleção anterior ao fazer nova busca
+            st.session_state.titulo_selecionado = ""
+            st.session_state.autor_preenchido = ""
 
-        if sugestoes:
-            st.write("**Selecione para preencher automaticamente:**")
-            for s in sugestoes:
-                label = f"📖 {s['titulo']}" + (f" — {s['autor']}" if s['autor'] else "")
-                if st.button(label, key=f"sug_{s['titulo']}"):
-                    st.session_state.titulo_selecionado = s["titulo"]
-                    st.session_state.autor_preenchido = s["autor"]
-                    st.rerun()
-        else:
-            st.info("Nenhuma sugestão encontrada. Preencha os campos manualmente.")
+    # Seletor de sugestões — aparece depois de buscar
+    if st.session_state.sugestoes:
+        opcoes_sugestoes = {
+            f"{s['titulo']} — {s['autor']}" if s['autor'] else s['titulo']: s
+            for s in st.session_state.sugestoes
+        }
+        # Opção vazia no topo para o usuário escolher
+        opcoes_lista = ["— Selecione uma sugestão ou preencha manualmente —"] + list(opcoes_sugestoes.keys())
+
+        escolha = st.selectbox(
+            "Sugestões do Google Books:",
+            opcoes_lista,
+            key="selectbox_sugestao"
+        )
+
+        # Quando seleciona uma sugestão, preenche os campos
+        if escolha != "— Selecione uma sugestão ou preencha manualmente —":
+            livro_escolhido = opcoes_sugestoes[escolha]
+            st.session_state.titulo_selecionado = livro_escolhido["titulo"]
+            st.session_state.autor_preenchido = livro_escolhido["autor"]
 
     st.divider()
-    st.write("**Preencha os dados do livro:**")
 
-    # Formulário principal
+    # Formulário principal — só salva quando clicar em Adicionar
     with st.form("form_adicionar", clear_on_submit=True):
         col1, col2 = st.columns(2)
 
@@ -363,6 +372,7 @@ with aba_adicionar:
                 if salvar_linha(novo_livro):
                     st.session_state.titulo_selecionado = ""
                     st.session_state.autor_preenchido = ""
+                    st.session_state.sugestoes = []
                     st.success(f"✅ '{novo_titulo}' adicionado com sucesso!")
                     st.rerun()
 
