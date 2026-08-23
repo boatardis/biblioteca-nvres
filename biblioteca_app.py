@@ -164,7 +164,8 @@ def buscar_google_books(titulo):
         params = {
             "q": titulo,
             "maxResults": 5,
-            "printType": "books"
+            "printType": "books",
+            "key": st.secrets["google_books_api_key"]
         }
 
         resposta = requests.get(url, params=params, timeout=5)
