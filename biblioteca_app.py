@@ -12,33 +12,13 @@ from google.oauth2.service_account import Credentials
 # --- CONFIGURAÇÃO ---
 SHEET_ID = "1pz19lMUQEMx2HXDqJhchiNOHJ3PPRepSc4L60DeSKvE"
 SHEET_NAME = "Página1"
-COLUNAS = ["id", "dono", "titulo", "autor", "edicao", "categoria"]
+COLUNAS = ["id", "dono", "titulo", "autor", "edicao"]
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive"
 ]
 
 DONOS = ["Elisa", "Francisco", "Luisa", "Patrícia"]
-
-CATEGORIAS = [
-    "Ficção",
-    "Fantasia",
-    "Ficção Científica",
-    "Terror",
-    "Romance",
-    "Clássicos",
-    "História",
-    "Filosofia",
-    "Economia e Política",
-    "Ciências",
-    "Quadrinhos e HQ",
-    "Culinária",
-    "Autoajuda",
-    "Infantojuvenil",
-    "Referência e Didático",
-    "Tarô e Espiritualidade",
-    "Outros",
-]
 
 
 # ============================================================
@@ -100,7 +80,6 @@ def salvar_linha(novo_livro):
             novo_livro["titulo"],
             novo_livro["autor"],
             novo_livro["edicao"],
-            novo_livro["categoria"]
         ])
         st.cache_data.clear()
         return True
@@ -119,13 +98,12 @@ def atualizar_linha(df, idx_df, dados_atualizados):
         for i, linha in enumerate(todos):
             if linha[0] == id_busca:
                 num_linha = i + 1
-                aba.update(f"A{num_linha}:F{num_linha}", [[
+                aba.update(f"A{num_linha}:E{num_linha}", [[
                     dados_atualizados["id"],
                     dados_atualizados["dono"],
                     dados_atualizados["titulo"],
                     dados_atualizados["autor"],
                     dados_atualizados["edicao"],
-                    dados_atualizados["categoria"]
                 ]])
                 st.cache_data.clear()
                 return True
@@ -170,10 +148,13 @@ def proximo_id(df):
     return int(ids_validos.astype(int).max()) + 1
 
 
+@st.cache_data(ttl=60)
 def buscar_google_books(titulo):
     """
     Busca livros na API do Google Books pelo título.
-    Retorna uma lista de sugestões com título e autor.
+    
+    @st.cache_data(ttl=60) guarda o resultado por 60 segundos
+    para não chamar a API a cada letra digitada.
     """
     if not titulo or len(titulo) < 3:
         return []
@@ -182,7 +163,6 @@ def buscar_google_books(titulo):
         url = "https://www.googleapis.com/books/v1/volumes"
         params = {
             "q": titulo,
-            "langRestrict": "pt",
             "maxResults": 5,
             "printType": "books"
         }
@@ -264,7 +244,7 @@ with aba_comprar:
         if not exatos.empty:
             st.error("⚠️ Já temos este livro na biblioteca!")
             st.dataframe(
-                exatos[["id", "titulo", "autor", "dono", "categoria", "edicao"]],
+                exatos[["id", "titulo", "autor", "dono", "edicao"]],
                 use_container_width=True,
                 hide_index=True
             )
@@ -279,7 +259,7 @@ with aba_comprar:
             if not parecidos.empty:
                 st.warning("Não encontramos esse título exato, mas existem títulos parecidos:")
                 st.dataframe(
-                    parecidos[["id", "titulo", "autor", "dono", "categoria", "edicao"]],
+                    parecidos[["id", "titulo", "autor", "dono", "edicao"]],
                     use_container_width=True,
                     hide_index=True
                 )
@@ -294,42 +274,65 @@ with aba_comprar:
 with aba_adicionar:
     st.subheader("Adicionar livro")
 
-    # Inicializa o session_state para guardar sugestão selecionada
+    # Inicializa session_state para guardar sugestão selecionada
+    # session_state persiste valores entre interações do usuário
     if "autor_preenchido" not in st.session_state:
         st.session_state.autor_preenchido = ""
     if "titulo_selecionado" not in st.session_state:
         st.session_state.titulo_selecionado = ""
 
-    # Campo de busca fora do formulário para sugestões em tempo real
-    titulo_digitado = st.text_input("Buscar título:", placeholder="Digite para ver sugestões", key="titulo_busca_api")
+    st.write("**Buscar na base do Google Books:**")
+    st.caption("Digite pelo menos 3 letras e clique em Buscar")
 
-    # Busca sugestões no Google Books enquanto o usuário digita
-    if titulo_digitado and len(titulo_digitado) >= 3:
-        sugestoes = buscar_google_books(titulo_digitado)
+    # Usamos um botão explícito de busca em vez de buscar
+    # enquanto digita — mais confiável no Streamlit
+    col_input, col_btn = st.columns([4, 1])
+    with col_input:
+        titulo_digitado = st.text_input(
+            "Título para buscar:",
+            placeholder="ex: Grande Sertão",
+            key="titulo_busca_api",
+            label_visibility="collapsed"
+        )
+    with col_btn:
+        buscar = st.button("🔍 Buscar", use_container_width=True)
+
+    # Busca só quando o botão é clicado
+    if buscar and titulo_digitado and len(titulo_digitado) >= 3:
+        with st.spinner("Buscando..."):
+            sugestoes = buscar_google_books(titulo_digitado)
 
         if sugestoes:
-            st.write("**Selecione uma sugestão para preencher automaticamente:**")
+            st.write("**Selecione para preencher automaticamente:**")
             for s in sugestoes:
-                label = f"{s['titulo']} — {s['autor']}" if s['autor'] else s['titulo']
+                label = f"📖 {s['titulo']}" + (f" — {s['autor']}" if s['autor'] else "")
                 if st.button(label, key=f"sug_{s['titulo']}"):
                     st.session_state.titulo_selecionado = s["titulo"]
                     st.session_state.autor_preenchido = s["autor"]
                     st.rerun()
+        else:
+            st.info("Nenhuma sugestão encontrada. Preencha os campos manualmente.")
 
     st.divider()
+    st.write("**Preencha os dados do livro:**")
 
     # Formulário principal
     with st.form("form_adicionar", clear_on_submit=True):
         col1, col2 = st.columns(2)
 
         with col1:
-            novo_titulo = st.text_input("Título *", value=st.session_state.titulo_selecionado)
-            novo_autor = st.text_input("Autor *", value=st.session_state.autor_preenchido)
+            novo_titulo = st.text_input(
+                "Título *",
+                value=st.session_state.titulo_selecionado
+            )
+            novo_autor = st.text_input(
+                "Autor *",
+                value=st.session_state.autor_preenchido
+            )
             nova_edicao = st.text_input("Edição/Editora (opcional)")
 
         with col2:
             novo_dono = st.selectbox("De quem é *", DONOS)
-            nova_categoria = st.selectbox("Categoria *", CATEGORIAS)
 
         submitted = st.form_submit_button("Adicionar livro", type="primary")
 
@@ -351,7 +354,6 @@ with aba_adicionar:
                     "titulo": novo_titulo,
                     "autor": novo_autor,
                     "edicao": nova_edicao,
-                    "categoria": nova_categoria
                 }
 
                 if salvar_linha(novo_livro):
@@ -398,9 +400,6 @@ with aba_editar:
                     dono_idx = DONOS.index(livro["dono"]) if livro["dono"] in DONOS else 0
                     ed_dono = st.selectbox("De quem é", DONOS, index=dono_idx)
 
-                    cat_idx = CATEGORIAS.index(livro["categoria"]) if livro["categoria"] in CATEGORIAS else 0
-                    ed_categoria = st.selectbox("Categoria", CATEGORIAS, index=cat_idx)
-
                 salvar = st.form_submit_button("Salvar alterações", type="primary")
 
                 if salvar:
@@ -410,7 +409,6 @@ with aba_editar:
                         "titulo": ed_titulo,
                         "autor": ed_autor,
                         "edicao": ed_edicao,
-                        "categoria": ed_categoria
                     }
                     if atualizar_linha(df, idx_editar, dados_atualizados):
                         st.success("✅ Livro atualizado com sucesso!")
@@ -443,7 +441,7 @@ with aba_remover:
             livro_rem = df.loc[idx_remover]
 
             st.dataframe(
-                pd.DataFrame([livro_rem])[["titulo", "autor", "dono", "categoria", "edicao"]],
+                pd.DataFrame([livro_rem])[["titulo", "autor", "dono", "edicao"]],
                 hide_index=True,
                 use_container_width=True
             )
@@ -464,27 +462,18 @@ with aba_todos:
     if df.empty:
         st.info("O catálogo está vazio.")
     else:
-        col1, col2 = st.columns(2)
-
-        with col1:
-            donos_filtro = ["Todos"] + DONOS
-            filtro_dono = st.selectbox("Filtrar por dono:", donos_filtro)
-
-        with col2:
-            cats_filtro = ["Todas"] + CATEGORIAS
-            filtro_categoria = st.selectbox("Filtrar por categoria:", cats_filtro)
+        donos_filtro = ["Todos"] + DONOS
+        filtro_dono = st.selectbox("Filtrar por dono:", donos_filtro)
 
         df_filtrado = df.copy()
         if filtro_dono != "Todos":
             df_filtrado = df_filtrado[df_filtrado["dono"] == filtro_dono]
-        if filtro_categoria != "Todas":
-            df_filtrado = df_filtrado[df_filtrado["categoria"] == filtro_categoria]
 
         df_filtrado = df_filtrado.sort_values(by=["dono", "titulo"])
 
         st.caption(f"{len(df_filtrado)} livro(s)")
         st.dataframe(
-            df_filtrado[["id", "titulo", "autor", "dono", "categoria", "edicao"]],
+            df_filtrado[["id", "titulo", "autor", "dono", "edicao"]],
             use_container_width=True,
             hide_index=True
         )
@@ -500,26 +489,15 @@ with aba_stats:
     if df.empty:
         st.info("O catálogo está vazio.")
     else:
-        col1, col2, col3 = st.columns(3)
+        col1, col2 = st.columns(2)
         with col1:
             st.metric("Total de livros", len(df))
         with col2:
             st.metric("Donos", df["dono"].nunique())
-        with col3:
-            st.metric("Categorias", df["categoria"].nunique())
 
         st.divider()
 
-        col1, col2 = st.columns(2)
-
-        with col1:
-            st.write("**Por dono:**")
-            contagem_dono = df["dono"].value_counts().reset_index()
-            contagem_dono.columns = ["Dono", "Livros"]
-            st.dataframe(contagem_dono, hide_index=True, use_container_width=True)
-
-        with col2:
-            st.write("**Por categoria:**")
-            contagem_cat = df["categoria"].value_counts().reset_index()
-            contagem_cat.columns = ["Categoria", "Livros"]
-            st.dataframe(contagem_cat, hide_index=True, use_container_width=True)
+        st.write("**Por dono:**")
+        contagem_dono = df["dono"].value_counts().reset_index()
+        contagem_dono.columns = ["Dono", "Livros"]
+        st.dataframe(contagem_dono, hide_index=True, use_container_width=True)
